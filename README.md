@@ -29,6 +29,8 @@ Responsive React-Web-App mit Supabase-Anmeldung, Datenbank und individuellen Tan
 
 ## QR-Code-Generator
 
+Tankverwaltung – erste Veröffentlichung
+
 `python qr_codes.py https://deine-domain.example`
 
 Benötigt Python-Pakete `qrcode[pil]` und `reportlab`. Die PNG-Dateien und die PDF werden im Ordner `qr-output` erzeugt.

@@ -19,7 +19,18 @@ async function saveFuel(e){e.preventDefault();if(loading||!tank||!confirm||!name
   ...payload,
   request_id:fuelRequest.current.id,
   qr_token:qrToken
-}});if(error||data?.error){setError(data?.error||error?.message||'Fehler beim Speichern');}else if(data?.saved){fuelRequest.current=null;await load();go('overview');setNotice(data.warning?'Betankung gespeichert. Hinweis: '+data.warning:'Betankung erfolgreich gespeichert.');}else{setError('Keine eindeutige Bestätigung erhalten. Bitte nicht mit geändertem Zählerstand erneut buchen.');}}catch(err){setError('Verbindung unterbrochen. Bitte denselben Vorgang erneut senden, nicht neu anlegen.')}finally{setLoading(false)}}
+}});if(error||data?.error){
+  let message=data?.error||error?.message||'Fehler beim Speichern';
+
+  if(error?.context){
+    try{
+      const details=await error.context.json();
+      if(details?.error)message=details.error;
+    }catch(e){}
+  }
+
+  setError(message);
+}else if(data?.saved){fuelRequest.current=null;await load();go('overview');setNotice(data.warning?'Betankung gespeichert. Hinweis: '+data.warning:'Betankung erfolgreich gespeichert.');}else{setError('Keine eindeutige Bestätigung erhalten. Bitte nicht mit geändertem Zählerstand erneut buchen.');}}catch(err){setError('Verbindung unterbrochen. Bitte denselben Vorgang erneut senden, nicht neu anlegen.')}finally{setLoading(false)}}
 async function saveRefill(e){e.preventDefault();if(!tank||!unlocked||!confirm||!name||!Number.isFinite(added)||added<=0||!Number.isFinite(finalStock)||finalStock<0)return;setLoading(true);setError('');const{data,error}=await supabase.functions.invoke('refill',{body:{tank_id:tank.id,operator:name,amount:added,corrected_stock:override.trim()?Number(override):null,password:refillPassword,qr_token:qrToken}});if(error||data?.error)setError(data?.error||error?.message||'Fehler beim Speichern');else{await load();go('overview');setNotice('Tankauffüllung erfolgreich gespeichert.')}setLoading(false)}
 if(!validQrLink){
   return (

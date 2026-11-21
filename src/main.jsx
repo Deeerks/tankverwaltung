@@ -6,6 +6,23 @@ const qrToken = qrParams.get('token') || '';
 const validQrLink =
   ['doppelachser', 'einachser'].includes(qrTank) &&
   /^[0-9a-f]{64}$/i.test(qrToken);
+function parseMeter(value) {
+  const text = String(value).trim().replace(/\s/g, '');
+
+  if (!text) return NaN;
+
+  // Deutsche Schreibweise: 12.550,5
+  if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(text)) {
+    return Number(text.replace(/\./g, '').replace(',', '.'));
+  }
+
+  // Ohne Tausendertrennzeichen: 12550 oder 12550,5
+  if (/^\d+(?:[,.]\d{1,2})?$/.test(text)) {
+    return Number(text.replace(',', '.'));
+  }
+
+  return NaN;
+}
 function App(){const [loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[tanks,setTanks]=useState([]),[history,setHistory]=useState([]),[names,setNames]=useState([]),[selected,setSelected]=useState(tankFromUrl()==='einachser'?'einachser':'doppelachser'),[tab,setTab]=useState('fuel'),[operator,setOperator]=useState(''),[newOperator,setNewOperator]=useState(''),[plane,setPlane]=useState('D-ELLH'),[otherPlane,setOtherPlane]=useState(''),[meter,setMeter]=useState(''),[amount,setAmount]=useState(''),[override,setOverride]=useState(''),[refillPassword,setRefillPassword]=useState(''),[unlocked,setUnlocked]=useState(false),[confirm,setConfirm]=useState(false);
 const fuelRequest=useRef(null);const tank=tanks.find(t=>t.slug===selected);const name=(operator==='__new__'?newOperator:operator).trim();const callSign=(plane==='__other__'?otherPlane:plane).trim().toUpperCase();const dispensed=meter.trim()?Number(meter)-Number(tank?.meter??0):NaN;const fuelStock=Number(tank?.stock??0)-dispensed;const added=amount.trim()?Number(amount):NaN;const calculated=Number(tank?.stock??0)+added;const finalStock=override.trim()?Number(override):calculated;
 

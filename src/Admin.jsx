@@ -181,7 +181,9 @@ function TankManagement({
     setTank(selectedTank);
 
     setNewStock(
-      inputLiters(selectedTank.stock)
+      Number(selectedTank.stock) < 0
+        ? ''
+        : inputLiters(selectedTank.stock)
     );
 
     setNewMeter(
@@ -459,8 +461,8 @@ function TankManagement({
 
           <div className="calculation">
             <div>
-              <span>Aktueller Tankinhalt</span>
-              <b>
+              <span>Aktueller rechnerischer Tankinhalt</span>
+              <b style={Number(tank.stock) < 0 ? { color: '#b91c1c' } : undefined}>
                 {formatLiters(tank.stock)} L
               </b>
             </div>
@@ -472,6 +474,13 @@ function TankManagement({
               </b>
             </div>
           </div>
+
+          {Number(tank.stock) < 0 && (
+            <div className="error banner" role="alert">
+              Negativer rechnerischer Tankbestand. Bitte den tatsächlichen
+              Tankinhalt ermitteln und als nicht negativen Wert eingeben.
+            </div>
+          )}
 
           <form onSubmit={saveCorrection}>
 
@@ -696,7 +705,9 @@ function TankManagement({
             <b>Tankinhalt</b>
 
             <div>
-              {formatLiters(item.old_stock)}
+              <span style={Number(item.old_stock) < 0 ? { color: '#b91c1c', fontWeight: 700 } : undefined}>
+                {formatLiters(item.old_stock)}
+              </span>
               {' → '}
               {formatLiters(item.new_stock)} L
             </div>

@@ -1,6 +1,19 @@
 
-import React, { useEffect, useState } from 'react';
-import { Shield, Lock, LogOut, Clock } from 'lucide-react';
+import React, {
+  useEffect,
+  useState,
+  useRef
+} from 'react';
+
+import {
+  Shield,
+  Lock,
+  LogOut,
+  Clock,
+  ArrowLeft,
+  RefreshCw
+} from 'lucide-react';
+
 import './style.css';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -36,6 +49,704 @@ async function adminRequest(body) {
   return data;
 }
 
+function formatLiters(value) {
+  return Number(value).toLocaleString('de-DE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function inputLiters(value) {
+  return Number(value)
+    .toFixed(2)
+    .replace('.', ',');
+}
+
+function parseLiters(value) {
+  const text = String(value).trim();
+
+  if (!/^\d+(?:[,.]\d{1,2})?$/.test(text)) {
+    return null;
+  }
+
+  const number = Number(
+    text.replace(',', '.')
+  );
+
+  if (
+    !Number.isFinite(number) ||
+    number < 0 ||
+    number > 9999999999.99
+  ) {
+    return null;
+  }
+
+  return number;
+}
+
+function normalizeLiters(value) {
+  const number = parseLiters(value);
+
+  return number === null
+    ? value
+    : inputLiters(number);
+}
+
+function formatDate(value) {
+  return new Date(value).toLocaleString(
+    'de-DE',
+    {
+      timeZone: 'Europe/Berlin',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }
+  );
+}
+
+function TankManagement({
+  tankId,
+  session,
+  connectionOk,
+  onBack,
+  onSessionInvalid
+}) {
+  const [tank, setTank] = useState(null);
+  const [corrections, setCorrections] = useState([]);
+  const [newStock, setNewStock] = useState('');
+  const [newMeter, setNewMeter] = useState('');
+  const [reason, setReason] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [pending, setPending] = useState(null);
+
+  const active = useRef(false);
+  const busy = useRef(false);
+  const requestRef = useRef(null);
+
+  const tankName =
+    tankId === 1
+      ? 'Doppelachser'
+      : 'Einachser';
+
+  function handleError(err) {
+    if (!active.current) return;
+
+    if (
+      err.status === 401 ||
+      err.status === 403
+    ) {
+      onSessionInvalid();
+      return;
+    }
+
+    setError(
+      err.name === 'TimeoutError'
+        ? 'Keine Antwort vom Server. Bitte erneut versuchen.'
+        : err.message
+    );
+  }
+
+  async function fetchTankData() {
+    const [tankData, historyData] =
+      await Promise.all([
+        adminRequest({
+          action: 'get_tanks',
+          session_token: session.token
+        }),
+        adminRequest({
+          action: 'get_corrections',
+          session_token: session.token,
+          tank_id: tankId
+        })
+      ]);
+
+    const selectedTank = tankData.tanks.find(
+      item => item.id === tankId
+    );
+
+    if (!selectedTank) {
+      throw new Error(
+        'Der ausgewählte Tank wurde nicht gefunden.'
+      );
+    }
+
+    if (!active.current) return;
+
+    setTank(selectedTank);
+
+    setNewStock(
+      inputLiters(selectedTank.stock)
+    );
+
+    setNewMeter(
+      inputLiters(selectedTank.meter)
+    );
+
+    setCorrections(
+      historyData.corrections || []
+    );
+
+    setReason('');
+    setConfirmed(false);
+  }
+
+  async function loadData() {
+    if (busy.current || requestRef.current) return;
+
+    busy.current = true;
+
+    setLoading(true);
+    setError('');
+    setNotice('');
+    setTank(null);
+
+    try {
+      await fetchTankData();
+
+    } catch (err) {
+      handleError(err);
+
+    } finally {
+      busy.current = false;
+
+      if (active.current) {
+        setLoading(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    active.current = true;
+
+    loadData();
+
+    return () => {
+      active.current = false;
+    };
+  }, [tankId, session.token]);
+
+  const parsedStock = parseLiters(newStock);
+  const parsedMeter = parseLiters(newMeter);
+
+  const changed =
+    tank !== null &&
+    parsedStock !== null &&
+    parsedMeter !== null &&
+    (
+      parsedStock !== Number(tank.stock) ||
+      parsedMeter !== Number(tank.meter)
+    );
+
+  const canSave =
+    connectionOk &&
+    !loading &&
+    !saving &&
+    tank !== null &&
+    changed &&
+    reason.trim().length > 0 &&
+    reason.trim().length <= 500 &&
+    confirmed;
+
+  async function saveCorrection(event) {
+    event.preventDefault();
+
+    if (
+      busy.current ||
+      !connectionOk ||
+      loading ||
+      saving
+    ) {
+      return;
+    }
+
+    let payload = requestRef.current;
+
+    if (!payload) {
+      if (!canSave) return;
+
+      payload = {
+        action: 'correct_tank',
+        session_token: session.token,
+        tank_id: tankId,
+        expected_stock: Number(tank.stock),
+        expected_meter: Number(tank.meter),
+        new_stock: parsedStock,
+        new_meter: parsedMeter,
+        reason: reason.trim(),
+        request_id: crypto.randomUUID()
+      };
+
+      requestRef.current = payload;
+      setPending(payload);
+    }
+
+    busy.current = true;
+
+    setSaving(true);
+    setError('');
+    setNotice('');
+
+    try {
+      await adminRequest(payload);
+
+      if (!active.current) return;
+
+      requestRef.current = null;
+
+      setPending(null);
+      setConfirmed(false);
+      setReason('');
+      setTank(null);
+
+      setNotice(
+        'Tankkorrektur erfolgreich gespeichert.'
+      );
+
+      try {
+        await fetchTankData();
+
+      } catch (err) {
+        if (!active.current) return;
+
+        if (
+          err.status === 401 ||
+          err.status === 403
+        ) {
+          onSessionInvalid();
+          return;
+        }
+
+        setError(
+          'Die Korrektur wurde gespeichert. Die aktuellen Tankdaten konnten jedoch nicht neu geladen werden. Bitte aktualisieren.'
+        );
+      }
+
+    } catch (err) {
+      if (!active.current) return;
+
+      if (
+        err.status === 401 ||
+        err.status === 403
+      ) {
+        onSessionInvalid();
+        return;
+      }
+
+      if (
+        err.status === 400 ||
+        err.status === 404 ||
+        err.status === 409
+      ) {
+        requestRef.current = null;
+
+        setPending(null);
+        setConfirmed(false);
+
+        if (
+          err.status === 409 ||
+          err.status === 404
+        ) {
+          setTank(null);
+        }
+
+        handleError(err);
+
+      } else {
+        setError(
+          'Die Speicherung konnte nicht bestätigt werden. Bitte wiederhole dieselbe Anfrage. Eine doppelte Korrektur wird serverseitig verhindert.'
+        );
+      }
+
+    } finally {
+      busy.current = false;
+
+      if (active.current) {
+        setSaving(false);
+      }
+    }
+  }
+
+  const fieldsDisabled =
+    !connectionOk ||
+    loading ||
+    saving ||
+    pending !== null;
+
+  return (
+    <section>
+
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={
+          loading ||
+          saving ||
+          pending !== null
+        }
+        style={{
+          width: '100%',
+          marginBottom: '16px'
+        }}
+      >
+        <ArrowLeft
+          size={18}
+          style={{
+            verticalAlign: 'middle',
+            marginRight: '6px'
+          }}
+        />
+        Zurück zur Übersicht
+      </button>
+
+      <h3>{tankName} verwalten</h3>
+
+      {error && (
+        <div
+          className="error banner"
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
+
+      {notice && (
+        <div
+          className="success banner"
+          role="status"
+        >
+          {notice}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={loadData}
+        disabled={
+          !connectionOk ||
+          loading ||
+          saving ||
+          pending !== null
+        }
+        style={{
+          width: '100%',
+          marginBottom: '16px'
+        }}
+      >
+        <RefreshCw
+          size={17}
+          style={{
+            verticalAlign: 'middle',
+            marginRight: '6px'
+          }}
+        />
+        Aktuelle Werte neu laden
+      </button>
+
+      {loading && (
+        <p className="hint">
+          Tankdaten werden geladen …
+        </p>
+      )}
+
+      {tank && !loading && (
+        <>
+
+          <div className="calculation">
+            <div>
+              <span>Aktueller Tankinhalt</span>
+              <b>
+                {formatLiters(tank.stock)} L
+              </b>
+            </div>
+
+            <div>
+              <span>Aktueller Zählerstand</span>
+              <b>
+                {formatLiters(tank.meter)} L
+              </b>
+            </div>
+          </div>
+
+          <form onSubmit={saveCorrection}>
+
+            <label>
+              Neuer Tankinhalt (Liter)
+
+              <input
+                type="text"
+                inputMode="decimal"
+                value={newStock}
+                onChange={event => {
+                  setNewStock(event.target.value);
+                  setConfirmed(false);
+                }}
+                onBlur={() => {
+                  setNewStock(
+                    normalizeLiters(newStock)
+                  );
+                }}
+                disabled={fieldsDisabled}
+                maxLength={13}
+                required
+              />
+            </label>
+
+            <label>
+              Neuer Zählerstand (Liter)
+
+              <input
+                type="text"
+                inputMode="decimal"
+                value={newMeter}
+                onChange={event => {
+                  setNewMeter(event.target.value);
+                  setConfirmed(false);
+                }}
+                onBlur={() => {
+                  setNewMeter(
+                    normalizeLiters(newMeter)
+                  );
+                }}
+                disabled={fieldsDisabled}
+                maxLength={13}
+                required
+              />
+            </label>
+
+            {(
+              parsedStock === null ||
+              parsedMeter === null
+            ) && (
+              <p className="hint">
+                Bitte gültige, nicht negative
+                Werte mit höchstens zwei
+                Nachkommastellen eingeben.
+              </p>
+            )}
+
+            <label>
+              Begründung der Korrektur *
+
+              <textarea
+                value={reason}
+                onChange={event => {
+                  setReason(event.target.value);
+                  setConfirmed(false);
+                }}
+                placeholder="Grund der Änderung eingeben …"
+                maxLength={500}
+                rows={4}
+                disabled={fieldsDisabled}
+                required
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '12px',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  font: 'inherit',
+                  resize: 'vertical'
+                }}
+              />
+            </label>
+
+            <p
+              className="hint"
+              style={{ textAlign: 'right' }}
+            >
+              {reason.length}/500 Zeichen
+            </p>
+
+            {changed && (
+              <div className="calculation">
+
+                <div>
+                  <span>Neuer Tankinhalt</span>
+                  <b>
+                    {formatLiters(parsedStock)} L
+                  </b>
+                </div>
+
+                <div>
+                  <span>Neuer Zählerstand</span>
+                  <b>
+                    {formatLiters(parsedMeter)} L
+                  </b>
+                </div>
+
+              </div>
+            )}
+
+            <label
+              style={{
+                display: 'flex',
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: '10px',
+                margin: '18px 0'
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={event =>
+                  setConfirmed(event.target.checked)
+                }
+                disabled={fieldsDisabled}
+                required
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  flexShrink: 0,
+                  marginTop: '2px'
+                }}
+              />
+
+              <span>
+                Ich bestätige die neuen Werte
+                und dass der Tank momentan
+                nicht benutzt wird.
+              </span>
+            </label>
+
+            <button
+              type="submit"
+              disabled={
+                pending
+                  ? !connectionOk || saving
+                  : !canSave
+              }
+              style={{ width: '100%' }}
+            >
+              {saving
+                ? 'Korrektur wird gespeichert …'
+                : pending
+                  ? 'Speicherung erneut prüfen'
+                  : 'Korrektur speichern'}
+            </button>
+
+            {pending && (
+              <p className="hint">
+                Der Ausgang der Anfrage ist noch
+                nicht bestätigt. Die Eingaben
+                bleiben für eine sichere
+                Wiederholung gesperrt.
+              </p>
+            )}
+
+            <p className="hint">
+              Manuelle Korrekturen werden separat
+              protokolliert und nicht als
+              Betankung oder Kraftstoffverbrauch
+              erfasst.
+            </p>
+
+          </form>
+        </>
+      )}
+
+      <hr
+        style={{
+          border: 0,
+          borderTop: '1px solid #dbe3ed',
+          margin: '24px 0'
+        }}
+      />
+
+      <h3>Bisherige Korrekturen</h3>
+
+      {!loading && tank && corrections.length === 0 && (
+        <p className="hint">
+          Für diesen Tank wurden bisher keine
+          manuellen Korrekturen gespeichert.
+        </p>
+      )}
+
+      {!loading && tank && corrections.map(item => (
+        <div
+          key={item.id}
+          style={{
+            border: '1px solid #dbe3ed',
+            borderRadius: '10px',
+            padding: '14px',
+            marginBottom: '12px'
+          }}
+        >
+
+          <strong>
+            {formatDate(item.created_at)} Uhr
+          </strong>
+
+          <p className="hint">
+            Korrektur Nr. {item.id}
+          </p>
+
+          <div
+            style={{
+              margin: '12px 0',
+              overflowWrap: 'anywhere'
+            }}
+          >
+            <b>Tankinhalt</b>
+
+            <div>
+              {formatLiters(item.old_stock)}
+              {' → '}
+              {formatLiters(item.new_stock)} L
+            </div>
+          </div>
+
+          <div
+            style={{
+              margin: '12px 0',
+              overflowWrap: 'anywhere'
+            }}
+          >
+            <b>Zählerstand</b>
+
+            <div>
+              {formatLiters(item.old_meter)}
+              {' → '}
+              {formatLiters(item.new_meter)} L
+            </div>
+          </div>
+
+          <b>Begründung</b>
+
+          <p
+            style={{
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere'
+            }}
+          >
+            {item.reason}
+          </p>
+
+          <p className="hint">
+            Bearbeiter: {item.corrected_by}
+          </p>
+
+        </div>
+      ))}
+
+      {corrections.length === 100 && (
+        <p className="hint">
+          Es werden die letzten 100
+          Korrekturen angezeigt.
+        </p>
+      )}
+
+    </section>
+  );
+}
+
 export default function Admin() {
   const [password, setPassword] = useState('');
   const [session, setSession] = useState(null);
@@ -44,8 +755,25 @@ export default function Admin() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [connectionOk, setConnectionOk] = useState(false);
+  const [selectedTank, setSelectedTank] = useState(null);
+
+  const loginBusy = useRef(false);
+
+  function invalidateSession() {
+    setSession(null);
+    setConnectionOk(false);
+    setSelectedTank(null);
+    setRemaining(0);
+    setPassword('');
+    setError('');
+
+    setNotice(
+      'Deine Admin-Sitzung ist ungültig oder abgelaufen. Bitte erneut anmelden.'
+    );
+  }
 
   // Countdown der Admin-Sitzung
+
   useEffect(() => {
     if (!session) return;
 
@@ -53,40 +781,51 @@ export default function Admin() {
       const seconds = Math.max(
         0,
         Math.ceil(
-          (new Date(session.expires_at).getTime() -
-            Date.now()) / 1000
+          (
+            new Date(session.expires_at).getTime() -
+            Date.now()
+          ) / 1000
         )
       );
 
       setRemaining(seconds);
 
       if (seconds === 0) {
-        setSession(null);
-        setConnectionOk(false);
-        setNotice(
-          'Deine Admin-Sitzung ist abgelaufen. Bitte erneut anmelden.'
-        );
+        invalidateSession();
       }
     }
 
     updateTimer();
 
-    const timer = setInterval(updateTimer, 1000);
+    const timer = setInterval(
+      updateTimer,
+      1000
+    );
 
     return () => clearInterval(timer);
+
   }, [session]);
 
   // Serverseitige Sitzungsprüfung
+
   useEffect(() => {
     if (!session) return;
 
     let cancelled = false;
     let checking = false;
+    let connectionVersion = 0;
 
     async function checkSession() {
       if (cancelled || checking) return;
 
+      if (!navigator.onLine) {
+        setConnectionOk(false);
+        return;
+      }
+
       checking = true;
+
+      const version = connectionVersion;
 
       try {
         const data = await adminRequest({
@@ -97,17 +836,16 @@ export default function Admin() {
         if (cancelled) return;
 
         if (data.authenticated !== true) {
-          setSession(null);
-          setConnectionOk(false);
-          setRemaining(0);
-          setNotice(
-            'Deine Admin-Sitzung ist ungültig oder abgelaufen. Bitte erneut anmelden.'
-          );
-
+          invalidateSession();
           return;
         }
 
-        setConnectionOk(true);
+        if (
+          version === connectionVersion &&
+          navigator.onLine
+        ) {
+          setConnectionOk(true);
+        }
 
       } catch (err) {
         if (cancelled) return;
@@ -118,12 +856,7 @@ export default function Admin() {
           err.status === 401 ||
           err.status === 403
         ) {
-          setSession(null);
-          setRemaining(0);
-          setError('');
-          setNotice(
-            'Deine Admin-Sitzung ist ungültig oder abgelaufen. Bitte erneut anmelden.'
-          );
+          invalidateSession();
         }
 
       } finally {
@@ -132,6 +865,8 @@ export default function Admin() {
     }
 
     function handleOffline() {
+      connectionVersion++;
+
       if (!cancelled) {
         setConnectionOk(false);
       }
@@ -139,6 +874,8 @@ export default function Admin() {
 
     function handleVisibility() {
       if (document.visibilityState === 'visible') {
+        connectionVersion++;
+
         setConnectionOk(false);
         checkSession();
       }
@@ -186,18 +923,23 @@ export default function Admin() {
         handleVisibility
       );
     };
+
   }, [session]);
 
   // Anmeldung
+
   async function login(event) {
     event.preventDefault();
 
-    if (loading || !password) return;
+    if (loginBusy.current || !password) return;
+
+    loginBusy.current = true;
 
     setLoading(true);
     setError('');
     setNotice('');
     setConnectionOk(false);
+    setSelectedTank(null);
 
     try {
       const data = await adminRequest({
@@ -222,8 +964,10 @@ export default function Admin() {
         Math.max(
           0,
           Math.ceil(
-            (new Date(data.expires_at).getTime() -
-              Date.now()) / 1000
+            (
+              new Date(data.expires_at).getTime() -
+              Date.now()
+            ) / 1000
           )
         )
       );
@@ -241,12 +985,15 @@ export default function Admin() {
       );
 
     } finally {
+      loginBusy.current = false;
+
       setPassword('');
       setLoading(false);
     }
   }
 
   // Abmeldung
+
   async function logout() {
     if (!session || loading) return;
 
@@ -257,6 +1004,7 @@ export default function Admin() {
     setNotice('');
     setConnectionOk(false);
     setSession(null);
+    setSelectedTank(null);
     setPassword('');
     setRemaining(0);
 
@@ -303,7 +1051,10 @@ export default function Admin() {
       </h2>
 
       {error && (
-        <div className="error banner" role="alert">
+        <div
+          className="error banner"
+          role="alert"
+        >
           {error}
         </div>
       )}
@@ -316,6 +1067,7 @@ export default function Admin() {
 
       {!session ? (
         <>
+
           <p className="sub">
             Geschützter Verwaltungsbereich des
             VfM Klausheide
@@ -365,9 +1117,11 @@ export default function Admin() {
             </p>
 
           </form>
+
         </>
       ) : (
         <>
+
           {connectionOk ? (
             <div className="success banner">
               Du bist als Administrator angemeldet.
@@ -397,7 +1151,6 @@ export default function Admin() {
                     marginRight: '6px'
                   }}
                 />
-
                 Verbleibende Sitzungsdauer
               </span>
 
@@ -405,13 +1158,15 @@ export default function Admin() {
             </div>
           </div>
 
-          {connectionOk && (
+          {selectedTank === null ? (
             <>
+
               <h3>Tankverwaltung</h3>
 
               <button
                 type="button"
-                disabled
+                onClick={() => setSelectedTank(1)}
+                disabled={!connectionOk}
                 style={{
                   width: '100%',
                   marginBottom: '10px'
@@ -422,7 +1177,8 @@ export default function Admin() {
 
               <button
                 type="button"
-                disabled
+                onClick={() => setSelectedTank(2)}
+                disabled={!connectionOk}
                 style={{
                   width: '100%',
                   marginBottom: '20px'
@@ -445,11 +1201,25 @@ export default function Admin() {
               </button>
 
               <p className="hint">
-                Die Verwaltungsfunktionen werden
-                in den nächsten Entwicklungsschritten
-                freigeschaltet.
+                Der manuelle Versand der
+                Monatsberichte wird im nächsten
+                Entwicklungsabschnitt freigeschaltet.
               </p>
+
             </>
+          ) : (
+            <div hidden={!connectionOk}>
+
+              <TankManagement
+                key={`${session.token}-${selectedTank}`}
+                tankId={selectedTank}
+                session={session}
+                connectionOk={connectionOk}
+                onBack={() => setSelectedTank(null)}
+                onSessionInvalid={invalidateSession}
+              />
+
+            </div>
           )}
 
           <hr

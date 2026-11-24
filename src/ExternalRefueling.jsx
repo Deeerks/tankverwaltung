@@ -1,6 +1,7 @@
 
 import React, { useRef, useState } from 'react';
-import { Fuel, Camera, Plane } from 'lucide-react';
+import { Fuel, Camera, Plane, Shield } from 'lucide-react';
+import Admin from './Admin.jsx';
 import './style.css';
 
 const AIRCRAFT = [
@@ -138,6 +139,7 @@ export default function ExternalRefueling() {
 
   const token = params.get('token') || '';
 
+  const [tab, setTab] = useState('external');
   const [operator, setOperator] = useState('');
   const [aircraft, setAircraft] = useState('');
   const [fuelDate, setFuelDate] = useState(todayGermany);
@@ -379,12 +381,38 @@ export default function ExternalRefueling() {
 
       <main className="shell">
 
-        <nav>
-          <button className="active" type="button">
+        <nav
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '2fr 1fr',
+            gap: '10px'
+          }}
+        >
+          <button
+            className={tab === 'external' ? 'active' : ''}
+            type="button"
+            onClick={() => setTab('external')}
+          >
             <Plane size={19} />
             <span>Externe Betankung</span>
           </button>
+
+          <button
+            className={tab === 'admin' ? 'active' : ''}
+            type="button"
+            onClick={() => setTab('admin')}
+            disabled={loading || photoLoading}
+          >
+            <Shield size={19} />
+            <span>Admin</span>
+          </button>
         </nav>
+
+        <div hidden={tab !== 'admin'}>
+          <Admin />
+        </div>
+
+        <div hidden={tab !== 'external'}>
 
         {success ? (
           <div className="panel">
@@ -484,6 +512,11 @@ export default function ExternalRefueling() {
                   }
                   disabled={locked || loading}
                   required
+                  style={{
+                    width: '100%',
+                    minWidth: 0,
+                    boxSizing: 'border-box'
+                  }}
                 />
               </label>
 
@@ -592,8 +625,16 @@ export default function ExternalRefueling() {
               )}
 
               <label>
-                <Camera size={19} />
-                {' '}Rechnungsfoto (optional)
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Camera size={19} />
+                  Rechnungsfoto (optional)
+                </span>
 
                 <input
                   ref={fileInput}
@@ -713,6 +754,8 @@ export default function ExternalRefueling() {
             </form>
           </div>
         )}
+
+        </div>
       </main>
     </>
   );

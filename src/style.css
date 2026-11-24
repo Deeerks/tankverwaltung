@@ -1,1 +1,53 @@
 :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#132743;background:#edf3f9;font-synthesis:none}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{cursor:pointer;border:0}header{background:linear-gradient(120deg,#0e2543,#1a426b 65%,#52718a);color:white;padding:27px 0 34px}.shell{width:min(1060px,calc(100% - 30px));margin:auto}.head,.sectionhead,.entryhead{display:flex;align-items:center;justify-content:space-between;gap:15px}.brand{font-size:clamp(22px,3vw,32px);font-weight:800;display:flex;align-items:center;gap:12px}.head span{color:#d1e2f4}.logout{background:#ffffff22;color:white;border-radius:10px;padding:10px;display:flex;align-items:center;gap:7px}nav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:-18px 0 22px;position:relative}nav button{background:#fff;color:#29435d;border:1px solid #dbe4ef;border-radius:13px;padding:16px 7px;display:flex;justify-content:center;align-items:center;gap:9px;font-weight:700;box-shadow:0 4px 12px #142d4510}nav button.active{background:#1672c4;color:white;border-color:#1672c4}.tankgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:20px}.tankcard{text-align:left;border:2px solid #dbe7f2;background:linear-gradient(140deg,#fff,#edf5fc);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:9px;color:#152a46;box-shadow:0 8px 20px #14325010}.tankcard.selected{border-color:#2689dd;box-shadow:0 4px 16px #187dd026}.tankname{font-weight:750;font-size:19px}.tankcard strong{font-size:34px}.tankcard small,.sub,small,.hint{color:#58708a}.panel{background:#fff;border:1px solid #dce5f0;border-radius:19px;padding:clamp(18px,4vw,32px);box-shadow:0 8px 28px #17365012;margin-bottom:24px}.panel h2{margin:0 0 14px;font-size:24px}.panel p{line-height:1.5}.formpanel{max-width:760px}.panel form{display:grid;gap:18px}.panel label{display:grid;gap:8px;font-weight:650}.panel input:not([type=checkbox]),.panel select{width:100%;border:1px solid #bac9da;background:#fff;border-radius:10px;padding:13px 12px;color:#172d47;min-height:49px}.panel input:focus,.panel select:focus{outline:3px solid #b3dcff;border-color:#1879d2}.panel button:not(.secondary){background:linear-gradient(180deg,#2385db,#0a59ad);color:white;border-radius:11px;padding:15px 20px;font-weight:750}.panel button:disabled{opacity:.45;cursor:not-allowed}.panel button.secondary{display:flex;gap:6px;align-items:center;background:#e8f2fc;border-radius:9px;color:#1b5d9a;padding:9px 12px}.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:18px 0}.stats>div,.calculation{background:#eaf3fc;border-radius:13px;padding:16px}.stats small,.stats strong{display:block}.stats strong{font-size:25px;margin-top:7px}.calculation{display:grid;gap:14px}.calculation>div{display:flex;justify-content:space-between;gap:10px}.check{display:flex!important;flex-direction:row;align-items:center;gap:10px!important;font-weight:500!important}.check input{width:20px;height:20px;accent-color:#1575cb}.banner{padding:13px 17px;border-radius:10px;margin-bottom:16px}.error{color:#b12c32}.banner.error{background:#fff0f0}.success{background:#e6f6eb;color:#196c3a}.entries{display:grid;gap:12px}.entries article{border:1px solid #dbe6f1;border-radius:12px;padding:17px}.entries article p{margin:8px 0}.entries article small{display:block}.entryhead strong{color:#0d65ae}.login{max-width:440px;margin:10vh auto}.login .brand{color:#12568c;margin-bottom:25px}@media(max-width:600px){header{padding:18px 0 35px}.head span{font-size:12px}.logout{font-size:0}.logout svg{width:20px;height:20px}nav{gap:4px}nav button{flex-direction:column;gap:5px;font-size:11px;padding:11px 3px}.tankgrid{gap:9px}.tankcard{padding:13px;min-width:0}.tankname{font-size:15px}.tankcard strong{font-size:24px}.tankcard small{font-size:11px}.panel h2{font-size:21px}.stats strong{font-size:21px}}
+
+
+/* Optimierung der externen Betankung */
+
+.shell:has(nav button:only-child) nav {
+  grid-template-columns: 1fr;
+  max-width: 760px;
+}
+
+.shell:has(nav button:only-child) .panel input[type="date"] {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.shell:has(nav button:only-child) .panel label:has(input[type="file"]) {
+  display: block;
+}
+
+.shell:has(nav button:only-child) .panel label:has(input[type="file"]) svg {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 5px;
+}
+
+.shell:has(nav button:only-child) .panel input[type="file"] {
+  display: block;
+  margin-top: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 600px) {
+  .shell:has(nav button:only-child) nav button {
+    flex-direction: row;
+    font-size: 15px;
+    gap: 9px;
+    padding: 15px 12px;
+  }
+
+  .shell:has(nav button:only-child) .panel label {
+    min-width: 0;
+  }
+
+  .shell:has(nav button:only-child) .panel form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

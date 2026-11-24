@@ -1,4 +1,3 @@
-
 import React, {
   useEffect,
   useState,
@@ -747,6 +746,89 @@ function TankManagement({
   );
 }
 
+// Monatsbericht: Vorschau und bestätigter manueller Versand.
+function ReportManagement({ session, connectionOk, onBack, onSessionInvalid, pendingRef }) {
+  const currentMonth = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit'
+  }).format(new Date());
+  const [period, setPeriod] = useState(pendingRef.current?.period || currentMonth);
+  const [preview, setPreview] = useState(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(pendingRef.current);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const running = useRef(false);
+  const active = useRef(false);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+
+  async function request(action) {
+    if (running.current || !connectionOk) return;
+    if (action === 'preview' && (pendingRef.current || !/^\d{4}-\d{2}$/.test(period) || period > currentMonth)) return;
+    if (action === 'send' && !pendingRef.current && (!preview || !confirmed || sent)) return;
+    running.current = true;
+    setBusy(true); setError(''); setNotice('');
+    if (action === 'preview') { setPreview(null); setConfirmed(false); }
+    let payload = { action, period, session_token: session.token, include_excel: false };
+    if (action === 'send') {
+      if (!pendingRef.current) pendingRef.current = { period, request_id: crypto.randomUUID() };
+      setPending(pendingRef.current);
+      payload = { ...payload, ...pendingRef.current, confirm_send: true };
+    }
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/monthly-report`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+        body: JSON.stringify(payload), cache: 'no-store', signal: AbortSignal.timeout(90000)
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        if (response.status === 401 || response.status === 403) { if (active.current) onSessionInvalid(); return; }
+        throw new Error(data.error || 'Anfrage fehlgeschlagen.');
+      }
+      if (action === 'send') {
+        if (data.email_sent !== true) throw new Error('Versand nicht bestätigt.');
+        pendingRef.current = null;
+        if (!active.current) return;
+        setPending(null); setSent(true); setConfirmed(false);
+        setNotice(data.log_saved === false ? 'E-Mail angenommen, Versandprotokoll konnte nicht gespeichert werden. Nicht erneut senden.' : data.already_exists ? 'Dieser Bericht wurde bereits versendet.' : 'Monatsbericht wurde vom E-Mail-Dienst angenommen.');
+      } else if (active.current) {
+        if (data.preview !== true || data.period !== period || !data.summary) throw new Error('Ungültige Vorschau.');
+        setPreview(data);
+      }
+    } catch (err) {
+      if (active.current) setError(action === 'send' ? `${err.message} Versandstatus unklar oder Versand abgelehnt. Nur dieselbe Vorgangsnummer erneut prüfen; keinen neuen Versand starten.` : err.message);
+    } finally {
+      running.current = false;
+      if (active.current) setBusy(false);
+    }
+  }
+  const dateLabel = value => String(value).split('-').reverse().join('.');
+  return <section>
+    <button type="button" onClick={onBack} disabled={busy || !!pending} style={{width:'100%', marginBottom:16}}>Zurück zur Übersicht</button>
+    <h3>Monatsbericht versenden</h3>
+    <label>Berichtsmonat<input type="month" value={period} max={currentMonth} disabled={busy || !!pending || sent} onChange={e => {setPeriod(e.target.value); setPreview(null); setConfirmed(false); setError('');}} /></label>
+    <p className="hint">Der laufende Monat wird bis einschließlich heute ausgewertet. Beim Versand werden die Daten erneut aus der Datenbank gelesen.</p>
+    {error && <div className="error banner" role="alert">{error}</div>}
+    {notice && <div className="success banner" role="status">{notice}</div>}
+    {!sent && <button type="button" disabled={!connectionOk || busy || !!pending || !period || period > currentMonth} onClick={() => request('preview')} style={{width:'100%'}}>Berichtsvorschau laden</button>}
+    {busy && <p role="status">Bitte warten …</p>}
+    {preview && <>
+      <h3>{dateLabel(preview.period_start)} – {dateLabel(preview.period_end)}</h3>
+      {preview.partial && <p className="hint">Laufender Monat – Teilbericht</p>}
+      <div className="calculation">
+        {[['Intern',preview.summary.internal_liters,'L'],['Extern',preview.summary.external_liters,'L'],['Gesamt',preview.summary.total_liters,'L'],['Externe Kosten',preview.summary.external_costs,'€']].map(([label,value,unit]) => <div key={label}><span>{label}</span><b>{formatLiters(value)} {unit}</b></div>)}
+      </div>
+      <p>Empfänger: {preview.recipient}</p>
+      <p>Excel-Anhang: {preview.excel?.filename}</p>
+      <details><summary>Vollständigen Bericht anzeigen</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',font:'inherit'}}>{preview.report_text}</pre></details>
+      {!sent && !pending && <label style={{display:'flex',flexDirection:'row',gap:10,margin:'18px 0'}}><input type="checkbox" checked={confirmed} disabled={busy || !connectionOk} onChange={e => setConfirmed(e.target.checked)} style={{width:20,height:20,flexShrink:0}}/><span>Ich bestätige den E-Mail-Versand für diesen Berichtsmonat.</span></label>}
+    </>}
+    {!sent && (preview || pending) && <button type="button" disabled={!connectionOk || busy || (!pending && !confirmed)} onClick={() => request('send')} style={{width:'100%',marginTop:12}}>{pending ? 'Versandstatus erneut prüfen' : 'Monatsbericht per E-Mail versenden'}</button>}
+    {pending && <p className="hint">Vorgangsnummer: {pending.request_id}. Bei unklarem Status bitte nicht die Seite neu laden oder einen neuen Versand starten.</p>}
+  </section>;
+}
+
 export default function Admin() {
   const [password, setPassword] = useState('');
   const [session, setSession] = useState(null);
@@ -758,6 +840,7 @@ export default function Admin() {
   const [selectedTank, setSelectedTank] = useState(null);
 
   const loginBusy = useRef(false);
+  const reportPendingRef = useRef(null);
 
   function invalidateSession() {
     setSession(null);
@@ -1191,7 +1274,8 @@ export default function Admin() {
 
               <button
                 type="button"
-                disabled
+                onClick={() => setSelectedTank("report")}
+                disabled={!connectionOk}
                 style={{
                   width: '100%',
                   marginBottom: '15px'
@@ -1201,23 +1285,27 @@ export default function Admin() {
               </button>
 
               <p className="hint">
-                Der manuelle Versand der
-                Monatsberichte wird im nächsten
-                Entwicklungsabschnitt freigeschaltet.
+                Monatsbericht auswählen, prüfen und per E-Mail versenden.
               </p>
 
             </>
           ) : (
             <div hidden={!connectionOk}>
 
-              <TankManagement
+              {selectedTank === "report" ? <ReportManagement
+                session={session}
+                connectionOk={connectionOk}
+                pendingRef={reportPendingRef}
+                onBack={() => setSelectedTank(null)}
+                onSessionInvalid={invalidateSession}
+              /> : <TankManagement
                 key={`${session.token}-${selectedTank}`}
                 tankId={selectedTank}
                 session={session}
                 connectionOk={connectionOk}
                 onBack={() => setSelectedTank(null)}
                 onSessionInvalid={invalidateSession}
-              />
+              />}
 
             </div>
           )}

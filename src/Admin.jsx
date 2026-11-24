@@ -16,16 +16,21 @@ async function adminRequest(body) {
         'apikey': SUPABASE_KEY
       },
       body: JSON.stringify(body),
-      cache: 'no-store'
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000)
     }
   );
 
   const data = await response.json();
 
   if (!response.ok || !data.success) {
-    throw new Error(
+    const error = new Error(
       data.error || 'Die Anfrage ist fehlgeschlagen.'
     );
+
+    error.status = response.status;
+
+    throw error;
   }
 
   return data;
@@ -38,7 +43,9 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [connectionOk, setConnectionOk] = useState(false);
 
+  // Countdown der Admin-Sitzung
   useEffect(() => {
     if (!session) return;
 
@@ -55,6 +62,7 @@ export default function Admin() {
 
       if (seconds === 0) {
         setSession(null);
+        setConnectionOk(false);
         setNotice(
           'Deine Admin-Sitzung ist abgelaufen. Bitte erneut anmelden.'
         );
@@ -68,6 +76,119 @@ export default function Admin() {
     return () => clearInterval(timer);
   }, [session]);
 
+  // Serverseitige Sitzungsprüfung
+  useEffect(() => {
+    if (!session) return;
+
+    let cancelled = false;
+    let checking = false;
+
+    async function checkSession() {
+      if (cancelled || checking) return;
+
+      checking = true;
+
+      try {
+        const data = await adminRequest({
+          action: 'check_session',
+          session_token: session.token
+        });
+
+        if (cancelled) return;
+
+        if (data.authenticated !== true) {
+          setSession(null);
+          setConnectionOk(false);
+          setRemaining(0);
+          setNotice(
+            'Deine Admin-Sitzung ist ungültig oder abgelaufen. Bitte erneut anmelden.'
+          );
+
+          return;
+        }
+
+        setConnectionOk(true);
+
+      } catch (err) {
+        if (cancelled) return;
+
+        setConnectionOk(false);
+
+        if (
+          err.status === 401 ||
+          err.status === 403
+        ) {
+          setSession(null);
+          setRemaining(0);
+          setError('');
+          setNotice(
+            'Deine Admin-Sitzung ist ungültig oder abgelaufen. Bitte erneut anmelden.'
+          );
+        }
+
+      } finally {
+        checking = false;
+      }
+    }
+
+    function handleOffline() {
+      if (!cancelled) {
+        setConnectionOk(false);
+      }
+    }
+
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') {
+        setConnectionOk(false);
+        checkSession();
+      }
+    }
+
+    checkSession();
+
+    const interval = setInterval(
+      checkSession,
+      15000
+    );
+
+    window.addEventListener(
+      'offline',
+      handleOffline
+    );
+
+    window.addEventListener(
+      'online',
+      checkSession
+    );
+
+    document.addEventListener(
+      'visibilitychange',
+      handleVisibility
+    );
+
+    return () => {
+      cancelled = true;
+
+      clearInterval(interval);
+
+      window.removeEventListener(
+        'offline',
+        handleOffline
+      );
+
+      window.removeEventListener(
+        'online',
+        checkSession
+      );
+
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibility
+      );
+    };
+  }, [session]);
+
+  // Anmeldung
   async function login(event) {
     event.preventDefault();
 
@@ -76,6 +197,7 @@ export default function Admin() {
     setLoading(true);
     setError('');
     setNotice('');
+    setConnectionOk(false);
 
     try {
       const data = await adminRequest({
@@ -112,7 +234,11 @@ export default function Admin() {
       });
 
     } catch (err) {
-      setError(err.message);
+      setError(
+        err.name === 'TimeoutError'
+          ? 'Keine Verbindung zum Server. Bitte erneut versuchen.'
+          : err.message
+      );
 
     } finally {
       setPassword('');
@@ -120,19 +246,29 @@ export default function Admin() {
     }
   }
 
+  // Abmeldung
   async function logout() {
     if (!session || loading) return;
 
+    const token = session.token;
+
     setLoading(true);
     setError('');
+    setNotice('');
+    setConnectionOk(false);
+    setSession(null);
+    setPassword('');
+    setRemaining(0);
 
     try {
       await adminRequest({
         action: 'logout',
-        session_token: session.token
+        session_token: token
       });
 
-      setNotice('Du wurdest erfolgreich abgemeldet.');
+      setNotice(
+        'Du wurdest erfolgreich abgemeldet.'
+      );
 
     } catch {
       setNotice(
@@ -140,9 +276,6 @@ export default function Admin() {
       );
 
     } finally {
-      setSession(null);
-      setPassword('');
-      setRemaining(0);
       setLoading(false);
     }
   }
@@ -191,15 +324,16 @@ export default function Admin() {
           <form onSubmit={login}>
 
             <label>
-              <Lock
-                size={18}
+              <span
                 style={{
-                  verticalAlign: 'middle',
-                  marginRight: '6px'
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
                 }}
-              />
-
-              Admin-Passwort
+              >
+                <Lock size={18} />
+                Admin-Passwort
+              </span>
 
               <input
                 type="password"
@@ -221,7 +355,7 @@ export default function Admin() {
               style={{ width: '100%' }}
             >
               {loading
-                ? 'Anmeldung wird geprüft …'
+                ? 'Bitte warten …'
                 : 'Anmelden'}
             </button>
 
@@ -234,9 +368,21 @@ export default function Admin() {
         </>
       ) : (
         <>
-          <div className="success banner">
-            Du bist als Administrator angemeldet.
-          </div>
+          {connectionOk ? (
+            <div className="success banner">
+              Du bist als Administrator angemeldet.
+            </div>
+          ) : (
+            <div
+              className="error banner"
+              role="status"
+            >
+              Die Admin-Sitzung wird überprüft
+              oder die Serververbindung ist
+              unterbrochen. Die Verwaltungsfunktionen
+              sind vorsorglich gesperrt.
+            </div>
+          )}
 
           <div
             className="calculation"
@@ -259,48 +405,52 @@ export default function Admin() {
             </div>
           </div>
 
-          <h3>Tankverwaltung</h3>
+          {connectionOk && (
+            <>
+              <h3>Tankverwaltung</h3>
 
-          <button
-            type="button"
-            disabled
-            style={{
-              width: '100%',
-              marginBottom: '10px'
-            }}
-          >
-            Doppelachser verwalten
-          </button>
+              <button
+                type="button"
+                disabled
+                style={{
+                  width: '100%',
+                  marginBottom: '10px'
+                }}
+              >
+                Doppelachser verwalten
+              </button>
 
-          <button
-            type="button"
-            disabled
-            style={{
-              width: '100%',
-              marginBottom: '20px'
-            }}
-          >
-            Einachser verwalten
-          </button>
+              <button
+                type="button"
+                disabled
+                style={{
+                  width: '100%',
+                  marginBottom: '20px'
+                }}
+              >
+                Einachser verwalten
+              </button>
 
-          <h3>Monatsberichte</h3>
+              <h3>Monatsberichte</h3>
 
-          <button
-            type="button"
-            disabled
-            style={{
-              width: '100%',
-              marginBottom: '15px'
-            }}
-          >
-            Monatsbericht versenden
-          </button>
+              <button
+                type="button"
+                disabled
+                style={{
+                  width: '100%',
+                  marginBottom: '15px'
+                }}
+              >
+                Monatsbericht versenden
+              </button>
 
-          <p className="hint">
-            Die Verwaltungsfunktionen werden
-            in den nächsten Entwicklungsschritten
-            freigeschaltet.
-          </p>
+              <p className="hint">
+                Die Verwaltungsfunktionen werden
+                in den nächsten Entwicklungsschritten
+                freigeschaltet.
+              </p>
+            </>
+          )}
 
           <hr
             style={{

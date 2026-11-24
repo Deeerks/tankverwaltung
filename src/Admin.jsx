@@ -840,6 +840,66 @@ function ReportManagement({ session, connectionOk, onBack, onSessionInvalid, pen
   </section>;
 }
 
+// Geschützte Tankübersicht: wird beim Zurückkehren neu geladen.
+function AdminTankOverview({ session, onSessionInvalid }) {
+  const [tanks, setTanks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setTanks([]);
+    async function load() {
+      try {
+        const data = await adminRequest({
+          action: 'get_tanks', session_token: session.token
+        });
+        if (cancelled) return;
+        const items = [1, 2].map(id => data.tanks?.find(t => Number(t.id) === id));
+        if (items.some(t => !t || t.stock == null || t.meter == null ||
+          !Number.isFinite(Number(t.stock)) || !Number.isFinite(Number(t.meter)))) {
+          throw new Error('Die Tankdaten sind unvollständig.');
+        }
+        setTanks(items);
+      } catch (err) {
+        if (cancelled) return;
+        if (err.status === 401 || err.status === 403) {
+          onSessionInvalid();
+          return;
+        }
+        setError(err.message || 'Tankdaten konnten nicht geladen werden.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [session.token, revision]);
+
+  return <section style={{ marginBottom: 20 }}>
+    <h3>Aktuelle Tankbestände</h3>
+    {loading && <p role="status">Tankdaten werden geladen …</p>}
+    {error && <div className="error banner" role="alert">{error}</div>}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))', gap: 12 }}>
+      {tanks.map(tank => <div key={tank.id} style={{ border: '1px solid #dbe3ed', borderRadius: 12, padding: 16, background: '#e8f1fa', color: '#102b46' }}>
+        <strong>{tank.name}</strong>
+        <div style={{ fontSize: 26, fontWeight: 700, margin: '10px 0', color: Number(tank.stock) < 0 ? '#b91c1c' : undefined }}>
+          {formatLiters(tank.stock)} L
+        </div>
+        <small>Pumpenzähler: {formatLiters(tank.meter)} L</small>
+        {Number(tank.stock) < 0 && <p style={{ color: '#b91c1c' }}>Negativer rechnerischer Bestand</p>}
+      </div>)}
+    </div>
+    <button type="button" disabled={loading} onClick={() => setRevision(v => v + 1)} style={{ width: '100%', marginTop: 12 }}>
+      <RefreshCw size={17} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+      Tankbestände aktualisieren
+    </button>
+  </section>;
+}
+
 export default function Admin() {
   const [password, setPassword] = useState('');
   const [session, setSession] = useState(null);
@@ -1254,6 +1314,11 @@ export default function Admin() {
 
           {selectedTank === null ? (
             <>
+
+              {connectionOk && <AdminTankOverview
+                session={session}
+                onSessionInvalid={invalidateSession}
+              />}
 
               <h3>Tankverwaltung</h3>
 

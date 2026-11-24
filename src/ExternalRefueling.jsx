@@ -30,11 +30,21 @@ function todayGermany() {
 function parseDecimal(value) {
   const text = String(value).trim();
 
-  if (!/^\d+(?:,\d{1,2})?$/.test(text)) {
+  if (!/^\d+(?:[,.]\d{0,2})?$/.test(text)) {
     return NaN;
   }
 
   return Number(text.replace(',', '.'));
+}
+
+function normalizeDecimal(value) {
+  const number = parseDecimal(value);
+
+  if (!Number.isFinite(number)) {
+    return value;
+  }
+
+  return number.toFixed(2).replace('.', ',');
 }
 
 function formatDecimal(value) {
@@ -152,12 +162,6 @@ export default function ExternalRefueling() {
   const unitPrice = parseDecimal(pricePerLiter);
   const total = parseDecimal(totalPrice);
 
-  const validUnitPrice =
-    /^\d+,\d{2}$/.test(pricePerLiter.trim());
-
-  const validTotalPrice =
-    /^\d+,\d{2}$/.test(totalPrice.trim());
-
   const calculatedTotal = amount * unitPrice;
 
   const priceMismatch =
@@ -173,10 +177,10 @@ export default function ExternalRefueling() {
     Number.isFinite(amount) &&
     amount > 0 &&
     amount <= 2000 &&
-    validUnitPrice &&
+    Number.isFinite(unitPrice) &&
     unitPrice > 0 &&
     unitPrice <= 20 &&
-    validTotalPrice &&
+    Number.isFinite(total) &&
     total > 0 &&
     total <= 40000 &&
     !priceMismatch &&
@@ -221,7 +225,7 @@ export default function ExternalRefueling() {
       submitting.current ||
       loading ||
       photoLoading ||
-      !valid
+      (!request.current && !valid)
     ) {
       return;
     }
@@ -232,6 +236,12 @@ export default function ExternalRefueling() {
 
     try {
       if (!request.current) {
+        setLiters(normalizeDecimal(liters));
+        setPricePerLiter(
+          normalizeDecimal(pricePerLiter)
+        );
+        setTotalPrice(normalizeDecimal(totalPrice));
+
         request.current = {
           token,
           booking_id: crypto.randomUUID(),
@@ -503,6 +513,11 @@ export default function ExternalRefueling() {
                   onChange={e =>
                     setLiters(e.target.value)
                   }
+                  onBlur={e =>
+                    setLiters(
+                      normalizeDecimal(e.target.value)
+                    )
+                  }
                   disabled={locked || loading}
                   required
                 />
@@ -515,11 +530,14 @@ export default function ExternalRefueling() {
                   type="text"
                   inputMode="decimal"
                   placeholder="z. B. 2,35"
-                  pattern="[0-9]+,[0-9]{2}"
-                  title="Bitte mit Komma und zwei Nachkommastellen eingeben."
                   value={pricePerLiter}
                   onChange={e =>
                     setPricePerLiter(e.target.value)
+                  }
+                  onBlur={e =>
+                    setPricePerLiter(
+                      normalizeDecimal(e.target.value)
+                    )
                   }
                   disabled={locked || loading}
                   required
@@ -533,15 +551,34 @@ export default function ExternalRefueling() {
                   type="text"
                   inputMode="decimal"
                   placeholder="z. B. 117,50"
-                  pattern="[0-9]+,[0-9]{2}"
                   value={totalPrice}
                   onChange={e =>
                     setTotalPrice(e.target.value)
+                  }
+                  onBlur={e =>
+                    setTotalPrice(
+                      normalizeDecimal(e.target.value)
+                    )
                   }
                   disabled={locked || loading}
                   required
                 />
               </label>
+
+              {[
+                liters,
+                pricePerLiter,
+                totalPrice
+              ].some(value =>
+                value.trim() !== '' &&
+                !Number.isFinite(parseDecimal(value))
+              ) && (
+                <div className="error banner">
+                  Bitte gültige Zahlen mit höchstens
+                  zwei Nachkommastellen eingeben.
+                  Punkt und Komma sind erlaubt.
+                </div>
+              )}
 
               {priceMismatch && (
                 <div className="error banner">
@@ -659,7 +696,7 @@ export default function ExternalRefueling() {
                 disabled={
                   loading ||
                   photoLoading ||
-                  !valid
+                  (!locked && !valid)
                 }
               >
                 {loading
